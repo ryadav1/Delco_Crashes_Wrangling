@@ -1,0 +1,296 @@
+---
+title: "Data Wrangling with dplyr"
+output: html_document
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE, tidy.opts=list(width.cutoff=50))
+```
+
+
+```{r}
+#Put all necessary libraries here
+
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(ggthemes)
+
+```
+
+**We will use a few datasets:**
+* We will use the data on all reported crashes in Delaware County for 2016.  Information regarding the various variables can be found at this [link](https://data.pa.gov/Public-Safety/Crash-Data-1997-to-Current-Transportation/dc5b-gebx).
+* We will also use data from [this municipality website](http://munstats.pa.gov/Reports/ReportInformation2.aspx?report=CountyMuniDemo_Excel) which provides some demographic information on the counties.
+* Lastly, we will look at chronic illness data from the [CDC](https://catalog.data.gov/dataset/u-s-chronic-disease-indicators-cdi-e50c9).
+
+```{r}
+#Load the crash dataset
+crash_del <- read_csv("~/DataScience/Statistics/Data/crash_del.csv")
+
+#Additional demographic information dataset
+CountyMuniDemo <- read_csv("~/DataScience/Statistics/Data/CountyMuniDemo.csv")
+
+#CDC data
+CDC <- read_csv("~/DataScience/Statistics/Data/CDC2.csv")
+```
+
+Let's create a dataframe that lists the number of accidents involving bicycles by municipality where the table is sorted by the number of accidents, from the most to the least.  Which municipality had the most bicycle accidents?
+
+*********************************************************************************
+```{r}
+crash_del_df <- crash_del %>%
+  filter(Bicycle == "Yes") %>%
+  select(Municipality.Name, Bicycle) %>%
+  group_by(Municipality.Name) %>%
+  summarise(Number_Accidents = n()) %>%
+  arrange(desc(Number_Accidents))
+
+crash_del_df
+```
+
+Upper Darby Township has the most number of accidents related to bicycle (10). 
+
+*********************************************************************************
+
+Notice that the columns associated with road work have a lot of NAs.  Let's determine the number of NAs for each column that is associated with road work. 
+
+```{r, eval = TRUE}
+road_work_cols <- crash_del %>%
+  select(contains("Work.Zone")) %>%
+  summarise_all(funs(sum(is.na(.))))
+
+road_work_cols
+```
+
+Let's create a dataset that records the following: When a road worker is present when the accident occurred, break down by collision type, the frequency of the collision, the mean number of injuries, and the max number of injuries.  
+
+*********************************************************************************
+
+```{r}
+crash_del_rwp <- crash_del %>%
+  filter(Workers.Present == "Y") %>%
+  select(Collision.Type, Injury.Count) %>%
+  group_by(Collision_Type = Collision.Type) %>%
+  summarise(Frequency_Collisions = n(), Mean_Num_Injuries = mean(Injury.Count), Max_Num_Injury = max(Injury.Count))
+
+crash_del_rwp
+```
+'Hitting pedestrian' and 'Rear-end collision' caused more number of injuries on average (1.5 and 1.67 respectively) and the max number of injuries during these collision types was significantly more (3 and 5 resp.) than when the collision type was 'Angle' or 'Hit fixed object'.
+
+*********************************************************************************
+
+Let's look at the relationship between the variables `Overturned` and `Speeding`.
+
+*********************************************************************************
+Let's create a dataset that gives the counts for each category (e.g., when Overturned = Yes and Speeding = No), and the conditional proportions of speeding or not speeding, given a car was overturned or not.  
+
+```{r}
+crash_del_speed <- crash_del %>%
+  select(Overturned, Speeding) %>%
+  group_by(Overturned, Speeding) %>%
+  summarise(Count = n()) %>%
+  mutate(Cond_Prop = Count / sum(Count))
+
+crash_del_speed
+```
+
+Now, let's create a dataset that gives the counts and the other conditional proportions (given there was speeding or not, the proportion of times a car was overturned and the proportion of times a car wasn't overturned).  
+
+```{r}
+crash_del_speed2 <- crash_del %>%
+  select(Speeding, Overturned) %>%
+  group_by(Speeding, Overturned) %>%
+  summarise(Count = n()) %>%
+  mutate(Cond_Prop = Count / sum(Count))
+
+crash_del_speed2
+```
+
+
+*********************************************************************************
+Notice how the ordering of the `group_by` impacted the `mutate`: The first element of 'group_by' appeared as the first column and the second element as the second column. Depending on whether it evaluated to "Yes" or "No", the mutate function added a column which basically gave the conditional probability of second column (second element of 'group_by') occuring given that the first column (first element of 'group_by') occured. 
+
+*********************************************************************************
+
+The conditional proportions seem to be related no matter the order of the conditional probability. For instance, the proportions of overturns given there was speeding is around 7% which is almost the same, 9%, as the proportions of speeding given there was overturn. Similarly, the proportion of not speeding given there was an overturn is about 91% and there is 93% chance of overturns given there was speeding. 
+
+*********************************************************************************
+
+Let's see if there is a relationship between the population size of the county and the number of reported accidents.
+
+Let's create a dataset which has the number of reported accidents by municipality and add the demographic information from the additional dataset. 
+
+```{r, eval=TRUE}
+crash_all <- crash_del %>%
+  group_by(Muni_Name = tolower(Municipality.Name)) %>%
+  summarise(Number_Accidents = n()) 
+
+demo <- CountyMuniDemo 
+demo$MUNICIPALITY_NAME <- tolower(demo$MUNICIPALITY_NAME)
+
+demo2 <- select(demo, MUNICIPALITY_NAME, CENSUS_POPULATION)
+
+crash_demo <- left_join(crash_all, demo2, by = c("Muni_Name"= "MUNICIPALITY_NAME"))
+crash_demo
+
+```
+
+
+*********************************************************************************
+We used left_join() above. Three municipalities were dropped- colwyn boro, delaware county, east lansdowne boro.
+
+*********************************************************************************
+Let's create a graphic comparing the population and number of reported accidents.
+
+```{r}
+ggplot(crash_demo, aes(x = log10(CENSUS_POPULATION), y = Number_Accidents)) +
+  geom_point(col = "purple",
+             alpha = 0.6) +
+  geom_smooth() +
+  labs(x = "Log of Census Population",
+       y = "Number of Accidents",
+       title = "Scatterplot of population vs. number of reported accidents",
+       caption = "Source: CDC") 
+```
+
+*******************************************************************
+
+The average number of reported accidents for counties with population upto 10,000 is approx. 50. However, the number of reported accidents increase significantly more wrt to population for counties with population over 10,000. For population of about 32,000, there are approx. 300 reported accidents. Looking at the trend of number of accidents for population up to 10,000, we would expect this figure to be about 150, however it is twice as much. 
+
+*********************************************************************************
+
+**For the rest of the analysis, let's use the CDC data.**  
+
+*********************************************************************************
+
+```{r}
+CDC3 <- select(CDC, YearStart, Topic) %>%
+  filter(YearStart == '2016') %>%
+  group_by(Topic) %>%
+  summarise(Num_Obs = n())
+CDC3
+```
+There are 16 distinct topics for 2016. 
+
+*********************************************************************************
+
+Let's study influenza vaccination patterns since the flu has been so bad this year!
+
+Let's create a dataset that contains the age adjusted prevalence of the "Influenza vaccination among noninstitutionalized adults aged >= 18 years" for Pennsylvania and the US from 2010 to 2016.  
+
+```{r}
+CDC4 <- select(CDC, YearStart, LocationAbbr, Question, DataValueType, DataValue) %>%
+  filter(LocationAbbr == "US" | LocationAbbr == "PA",
+         Question == "Influenza vaccination among noninstitutionalized adults aged >= 18 years",
+         DataValueType == "Age-adjusted Prevalence")
+CDC4
+
+```
+
+
+Let's create a line graph comparing the immunization rates of Pennsylvania and the US.
+
+```{r}
+ggplot(CDC4, aes(x = YearStart, y = DataValue, col = LocationAbbr)) +
+  geom_line() + 
+  labs(title = "Immunization rates of PA and the US from 2010 - 2016",
+       x = "Year",
+       y = "Age adjusted prevalence of influence vaccination",
+          caption = "Source: CDC") 
+```
+
+*********************************************************************************
+
+From 2010-2015, the rate of influenza vaccinations was higher in the US compared to PA. However, from 2015-2016, higher rate of given population received vaccination in PA compared to the US. There was an increasing trend in the rate of vaccinations received in both the US and PA from 2012 to 2015. However, like it happened from 2011 to 2012, the rate has decreased for both the US and PA from 2015 to 2016. Moreover, it is worth noting that there is more dip in the rate of vaccination of the US population than in the PA population from 2015 to 2016.
+
+*********************************************************************************
+
+Let's see how immunization rates vary by region of the country. 
+
+Join the following dataset to our CDC dataset so that we have a column signifying the region of the country.  
+
+```{r}
+#We will use the following data to get the regions
+USregions <- read_csv("~/DataScience/Statistics/Data/USregions.csv")
+CDC_reg<- left_join(CDC, USregions, by = c("LocationDesc" = "State"))
+CDC_reg
+```
+
+*********************************************************************************
+Notice that there are NAs in the region column of the new dataset.
+
+District of Columbia is not in the USregions dataset; however, LocationDesc column contains District of Columbia in its rows. When we joined the matching values from the USregions to CDC dataset, each row that contained District of Columbia will have NA under the Region column.
+
+*********************************************************************************
+Let's create a dataset that contains the age adjusted influenza immunization rates in 2016 for each state in the country and sort it by highest immunization to lowest.  Which state has the highest immunization? 
+
+*********************************************************************************
+
+```{r}
+CDC5 <- select(CDC_reg, YearStart, YearEnd, LocationAbbr, Region, Question, DataValueType, DataValue) %>%
+  filter(YearStart == "2016",
+         YearEnd == "2016",
+         !LocationAbbr == "DC",
+         !LocationAbbr == "GU",
+         !LocationAbbr == "PR",
+         !LocationAbbr == "VI",
+         Question == "Influenza vaccination among noninstitutionalized adults aged >= 18 years",
+         DataValueType == "Age-adjusted Prevalence") %>%
+  arrange(desc(DataValue))
+  
+CDC5
+
+```
+
+South Dakota has the highest immunization.
+
+*********************************************************************************
+Let's construct a graphic of the 2016 influenza immunization rates by region of the country.
+
+```{r}
+ggplot(CDC5, aes( x= Region, y = DataValue, fill = Region)) +
+  geom_boxplot(alpha = 0.5) +
+  geom_jitter(col = "mediumvioletred",
+              alpha =  0.5) +
+  labs(x = "Regions of the US",
+       y = "Vaccination rate in 2016",
+       title = "Box-and-scatter plot of 2016 influenza immunization rates",
+       caption = "Source: CDC") +
+  scale_fill_brewer(palette="Set1") 
+```
+
+*********************************************************************************
+
+The above graphic shows that NE states had higher rate of vaccinations on average in 2016 and states on the West Coast had the lowest rate of vaccinations on average. The states in the Midwest had high fluctuations when it came to influenza vaccination rates. On average, more states in the Midwest had higher vaccination rates compared to states in the South and the West Coast. South Dakota seems to be the outlier on the top left-hand corner in the Midwest region.
+
+*********************************************************************************
+
+
+```{r}
+explo <- select(CDC_reg, LocationAbbr, Region, Question, DataValueType, DataValue) %>%
+  filter(!LocationAbbr == "DC",
+         !LocationAbbr == "GU",
+         !LocationAbbr == "PR",
+         !LocationAbbr == "VI",
+         Question == "Binge drinking prevalence among adults aged >= 18 years",
+         DataValueType == "Age-adjusted Prevalence") %>%
+  arrange(desc(DataValue))
+
+
+ggplot(explo, aes( x= Region, y = DataValue, fill = Region)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_jitter(col = "orange1",
+              alpha =  0.4) +
+  labs(x = "Regions of the US",
+       y = "Binge drinking rate 2010 - 2016",
+       title = "Box-and-scatter plot of binge drinking rates",
+       caption = "Source: CDC") +
+  scale_fill_brewer(palette="Set3") 
+
+```
+
+From the graphic above, we can see that, as one would expect, on average the binge drinking rate among the states in the South is the lowest compared to other regions in the US. The binge drinking rate in the Midwest is the highest on average. Midwest has more states with higher rate of binge drinking among the population greater than 18 years old. Most of the states with rate lower than 15% are in the South and the West Coast whereas there are only 4 states in the Midwest and the Northeast where the binge drinking rate is lower than 15% among the adults greater than 18 years old. 
+
+*********************************************************************************
+
